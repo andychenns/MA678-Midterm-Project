@@ -47,7 +47,7 @@ Forecasts are important for making business decisions such as knowing how much t
 By any measure, the commercial aviation sector is soaring.
 More people are taking to the air than ever before, as aviation industry has now recorded eight straight years of steady and above-trend growth. In the plot below, we can see the number of passengers carried in a certain year grew faster and faster, especially after 2010.
 
-![Number of passengers carried by aircrafts](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/pass.png)
+![Number of passengers carried by aircrafts](pass.png)
  https://tradingeconomics.com/world/air-transport-passengers-carried-wb-data.html
 
 In the past few months, however, there was a earthshaking trade war between China and United States. Among with many other counterattack policy published, one of them was a 25 percent tariff on U.S. civil aircraft with an empty weight of 15,000-45,000 kilograms, which is targeting below the Boeing model line. This is more like a warning shot to the U.S. Administration to proceed no further but it stirred some concerns in aviation industry.
@@ -56,7 +56,7 @@ As a former commercial pilot. I am personally interested in finding out if there
 
 After discussing time series, focus will be shifted to multilevel prediction model on number of passengers carried each year for an individual country. To keep this project relatively succinct, I choose not to predict the number of aircrafts delivered each year but focusing on the number of passengers each year. This is because predicting the number of aircrafts delivered entails factors like the size of aircraft, retirements, cancellation of order etc. In this graph, there is a dynamic relationship between state of the economy and airline industry.   
 
-![Fig 1](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/flow map.png)
+![Fig 1](flow map.png)
 
 ####Previous Work
 
@@ -136,7 +136,7 @@ dygraph(donchina) %>%
 It looks pretty chaos, so I'd like to use time series analysis to decompose. Time series analysis is a statistical technique that deals with time series data, or trend analysis. Time series data means that data is in a series of  particular time periods or intervals. Time series forecasting is the use of a model to predict future values based on previously observed values. 
 
 There are four parts in time series analysis: data, remainder, seasonal and trend. This picture to explains the relationship between four parts.
-![Time series](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/time-series.png)
+![Time series](time-series.png)
 
 
 From the graph below, we can see that the remainder fluctuates around 0 value and the aircraft export value trend increases from 2005 to 2018. There is a slightly drop of trend around 2008. This drop coincides with the financial crisis of 2007-2008.
@@ -335,7 +335,7 @@ ggplot(a, aes(y = log_passenger, x = log_GDP, group = `Country Name`, colour = I
 
 This is a picture explaining the definition of coastline length.
 
-![Definition of coastline length](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/coastline.jpeg)
+![Definition of coastline length](coastline.jpeg)
 
 
 
