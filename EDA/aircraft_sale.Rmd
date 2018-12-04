@@ -1,0 +1,490 @@
+---
+title: "Aviation Prediction"
+author: "Longhao Chen"
+date: "11/14/2018"
+output:
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(anytime)
+library(reshape2)
+library(readr)
+library(TTR)
+library(forecast)
+library(zoo)
+library(ggfortify)
+library(tseries)
+library(esquisse)
+library(xts)
+library(lubridate)
+library(dygraphs)
+library(lme4)
+library(gee)
+library(esquisse)
+library(gridExtra)
+library(car)
+library(data.table)
+library(ggpubr)
+library(gganimate)
+library(gapminder)
+library(sjPlot)
+library(sjlabelled)
+library(sjmisc)
+library(rstan)
+library(rstanarm)
+```
+
+#Abstract
+
+Forecasts are important for making business decisions such as knowing how much to produce. For many aircraft manufacturers, even a 1% increase in forecasting accuracy means an increase of millions of dollars in revenue. In this project, two models are developed as a step stone to predict the _number of delivered aircrafts_ in the future. The first model uses time series to predict the yearly new aircrafts export values. The second one applies macro economic variables to predict the yearly carried passenger for each country by using multi level mixed effect model.
+
+#Introduction
+
+#### Background
+By any measure, the commercial aviation sector is soaring.
+More people are taking to the air than ever before, as aviation industry has now recorded eight straight years of steady and above-trend growth. In the plot below, we can see the number of passengers carried in a certain year grew faster and faster, especially after 2010.
+
+![Number of passengers carried by aircrafts](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/pass.png)
+ https://tradingeconomics.com/world/air-transport-passengers-carried-wb-data.html
+
+In the past few months, however, there was a earthshaking trade war between China and United States. Among with many other counterattack policy published, one of them was a 25 percent tariff on U.S. civil aircraft with an empty weight of 15,000-45,000 kilograms, which is targeting below the Boeing model line. This is more like a warning shot to the U.S. Administration to proceed no further but it stirred some concerns in aviation industry.
+
+As a former commercial pilot. I am personally interested in finding out if there is any potential impact of this tariff by using time series prediction. It is important to keep in mind that aircraft delivery process takes very long cycle. For example, an order for four aircrafts can take several years before the last aircraft is delivered. Therefore, it is relatively not easy to draw a conclusion on the impact of tariff given the time span between the Chinese government published its policy and now(only a few months passed).
+
+After discussing time series, focus will be shifted to multilevel prediction model on number of passengers carried each year for an individual country. To keep this project relatively succinct, I choose not to predict the number of aircrafts delivered each year but focusing on the number of passengers each year. This is because predicting the number of aircrafts delivered entails factors like the size of aircraft, retirements, cancellation of order etc. In this graph, there is a dynamic relationship between state of the economy and airline industry.   
+
+![Fig 1](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/flow map.png)
+
+####Previous Work
+
+Since Airbus and Boeing company keep their predicting models as a commercial secret, our only available res ources are from previous research done on forecasting commercial airline demand. For example, Jacobson(1970) used a linear regression model to predict trips starting from an airport through two independent variables: average income and airfare. He prediction has an R squared value of 0.82. Another example was from Haney who used some socioeconomic variables to represent the city surrounding the airport. He used population, total personal income, fares, distance, time, highway miles, passenger originations.
+
+
+#Method and materials(Input variables)
+
+Since we are only interested in the traveling demand of a certain country. We will look at the following variables: GDP-worldwide per capita, GDP growth rate, interest rate, inflation rate, jet fuel price, crude oil price, passengers carried in last two years and coastline length. Besides of these variables, I would also use group indicators for different income group countries from high income to low income according to world bank website. Another group indicator is region which describes the geographical position of the country. One of interesting predictor variables is the coastline length in the model. Generally, a country with longer coastline length has bigger land areas. Therefore, people are more likely to take commercial aircraft since other transportation could be slow or inconvenient.
+
+The data collected are from these online websites, U.S. Census Bureau, World Bank open Data , U.S. Energy Information, and Central Intelligence Agency.
+
+
+```{r airplanes, message=FALSE, echo=FALSE, warning=FALSE}
+air_sale <- read_csv("~/Desktop/MA678/Midterm project/Data/onemoretime.csv", col_types = cols(Time = col_date(format = "%B %Y")))
+```
+
+
+
+```{r echo=FALSE}
+# We need to clean this data.
+air_sale$Time <- as.Date(air_sale$Time)
+air_sale$X5 <- NULL
+colnames(air_sale)[4] <- "value"
+
+# Sometimes there is no trade bewteen U.S.A and other countries, so we take the NA out.
+air_sale <- na.omit(air_sale)
+
+# I believe that two commodities names are the same content
+air_sale <- air_sale[air_sale$Commodity != "880240 Airplane & Ot A/c, Unladen Weight &gt; 15,000 Kg", ]
+air_sale[, 1] <- NULL
+
+# Change from long to wide matrix
+air_sale1 <- dcast(air_sale, Country ~ Time, value.var = "value")
+```
+
+# Results for time series prediction
+
+####Model choice
+
+Let's take a look at the export aircraft values of top 5 countries starting January 2004. They are France, United Kingdom, Canada, Brazil, China. We can see an overall increase of export aircraft values for these countries as well as some seasonality in aviation industry.
+
+```{r echo=FALSE}
+top5 <- air_sale1[c(74, 224, 38, 27, 43), ] %>% melt(id.vars = "Country")
+top5$variable <- as.Date(top5$variable)
+top5$value <- log(top5$value)
+top5 <- top5[-885, ]
+ggplot() +
+  geom_line(data = top5, aes(x = variable, y = value, color = Country)) + ylab("Aircraft value") + xlab("Year") + ggtitle("Jet aircraft export value from U.S.A to other countries") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+In the next step, we take a closer look at the export aircraft value to China. I have made an interactive plot so that customers can play with it.
+```{r echo=FALSE}
+air_sale_china <- air_sale1[air_sale1$Country == "China", ]
+china <- melt(air_sale_china, id.vars = "Country")
+china$variable <- as.Date(china$variable)
+# Somehow this value is not recorded, I copy it from the census website
+china[168, 3] <- 2569345423
+china <- china[-177, ]
+ggplot(china) +
+  geom_line(aes(x = variable, y = value)) + xlab("Year") + ylab("Export value") + ggtitle("Jet aircraft export from U.S.A to China") + theme(plot.title = element_text(hjust = 0.5))
+
+
+# Then I create the xts format, and thus use dygraph and create interactive
+donchina <- xts(x = china$value, order.by = china$variable)
+dygraph(donchina) %>%
+  dyOptions(labelsUTC = TRUE, fillGraph = TRUE, fillAlpha = 0.1, drawGrid = FALSE, colors = "#D8AE5A") %>%
+  dyRangeSelector() %>%
+  dyCrosshair(direction = "vertical") %>%
+  dyHighlight(highlightCircleSize = 5, highlightSeriesBackgroundAlpha = 0.2, hideOnMouseOut = FALSE) %>%
+  dyRoller(rollPeriod = 1)
+```
+
+####Interpretation
+
+It looks pretty chaos, so I'd like to use time series analysis to decompose. Time series analysis is a statistical technique that deals with time series data, or trend analysis. Time series data means that data is in a series of  particular time periods or intervals. Time series forecasting is the use of a model to predict future values based on previously observed values. 
+
+There are four parts in time series analysis: data, remainder, seasonal and trend. This picture to explains the relationship between four parts.
+![Time series](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/time-series.png)
+
+
+From the graph below, we can see that the remainder fluctuates around 0 value and the aircraft export value trend increases from 2005 to 2018. There is a slightly drop of trend around 2008. This drop coincides with the financial crisis of 2007-2008.
+
+
+
+```{r echo=FALSE, warning=FALSE}
+sale_china <- ts(data = china$value, start = 2004, frequency = 12)
+log_sale <- log(sale_china)
+log_sale %>% decompose() %>% autoplot() + ylab("Aircraft Export Value in Log") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+####Model checking
+
+The plot of residuals from the ARIMA(1,1,2) model shows that all autocorrelations are within the threshold limits(dotted blue lines). This indicates the residuals are behaving like white noise. We also know that some drops around 2003 and 2008 are caused by two economic crisis.
+```{r, warning=FALSE, message=FALSE}
+china_sale_forcast <- auto.arima(log_sale, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+checkresiduals(china_sale_forcast)
+```
+
+We are interested in forecast the same period from 2004 January to 2018 September by time-series using auto.arima function. As we can see the red line is the prediction whereas the black line are actual values of aircraft exporting to China. In general, our prediction matches with the trend of export aircraft values. There are several areas that black lines plummet down such as Jan 2016 and Jan 2017. With some calculation, I found out that there were only 12 aircrafts difference between the gap of December 2016 and Jan 2016. 
+
+```{r echo=FALSE}
+autoplot(china_sale_forcast) + xlab("Year") + ylab("Aircraft Export Value in Log") + ggtitle("Prediction by ARIMA function") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+In the plot below, we can see the prediction of value of aircrafts exporting to China in the next 12 months. The grey area is the 95% confidence interval area.
+
+```{r}
+china_sale_forcast %>% forecast(h = 12) %>% autoplot(PI = TRUE)
+```
+
+```{r echo=FALSE, message=FALSE,warning=FALSE}
+# These steps are to import data for various variables.
+passenger <- read_csv("~/Desktop/MA678/Midterm project/Data/passengers_everyyear.csv")
+passenger <- passenger[, c(-3, -4)]
+passenger <- melt(passenger, id.vars = c("Country Code", "Country Name"), na.rm = TRUE, value.name = "passenger")
+passenger$passenger <- as.numeric(passenger$passenger)
+passenger$variable <- as.character(passenger$variable)
+passenger$variable <- as.numeric(passenger$variable)
+ passenger_onemore <- passenger
+ passenger_twomore <- passenger
+ passenger_onemore$variable <- as.character(passenger_onemore$variable)
+ passenger_onemore$variable <- as.numeric(passenger_onemore$variable)
+ passenger_onemore$variable <- passenger_onemore[, 3] + 1
+ passenger_twomore$variable <- as.character(passenger_twomore$variable)
+ passenger_twomore$variable <- as.numeric(passenger_twomore$variable)
+ passenger_twomore$variable <- passenger_twomore[, 3] + 2
+ colnames(passenger_onemore)[4] <- "previous_year"
+ colnames(passenger_twomore)[4] <- "2previous_year"
+ passenger <- full_join(passenger, passenger_onemore, by = c("Country Code", "Country Name", "variable"))
+ passenger<- full_join(passenger,passenger_twomore, by = c("Country Code", "Country Name", "variable"))
+passenger$variable <- as.factor(passenger$variable)
+GDP <- read_csv("~/Desktop/MA678/Midterm project/Data/GDP.csv")
+GDP <- GDP[, c(-3, -4)]
+GDP <- melt(GDP, id.vars = c("Country Code", "Country Name"), na.rm = TRUE, value.name = "GDP")
+GDP$GDP <- as.numeric(GDP$GDP)
+GDP_growth <- read_csv("~/Desktop/MA678/Midterm project/Data/GDP_growth.csv")
+GDP_growth <- GDP_growth[, c(-3, -4)]
+GDP_growth <- melt(GDP_growth, id.vars = c("Country Code", "Country Name"), na.rm = TRUE, value.name = "GDP_growth")
+GDP_growth$GDP_growth <- as.numeric(GDP_growth$GDP_growth)
+
+# This is to limit our analysis on normal GDP growth rate.
+GDP_growth <- GDP_growth %>% filter(GDP_growth <= 20 & GDP_growth >= -20)
+
+Inflation <- read_csv("~/Desktop/MA678/Midterm project/Data/Inflation.csv")
+Inflation <- Inflation[, c(-3, -4)]
+Inflation <- melt(Inflation, id.vars = c("Country Code", "Country Name"), na.rm = TRUE, value.name = "Inflation")
+Inflation$Inflation <- as.numeric(Inflation$Inflation)
+# This is to limit our analysis on normal inflation rate
+Inflation <- Inflation %>% filter(Inflation <= 20 & Inflation >= -20)
+
+# To add a little fun for this model, I incorporate coastline distance in to the model
+coastline <- read_csv("~/Desktop/MA678/Midterm project/Data/coastline.csv")
+coastline$Coastline <- str_replace(coastline$Coastline, "km", "")
+coastline$Coastline <- str_replace(coastline$Coastline, ",", "")
+coastline$`Country Name` <- str_replace(coastline$`Country Name`, "Congo, Democratic Republic of the
+", "Congo, Dem. Rep.")
+coastline$`Country Name` <- str_replace(coastline$`Country Name`, "Congo, Republic of the", "Congo, Rep.")
+coastline$`Country Name` <- str_replace(coastline$`Country Name`, "Russia", "Russian Federation")
+coastline$Coastline <- as.numeric(coastline$Coastline)
+
+Interest <- read_csv("~/Desktop/MA678/Midterm project/Data/Interest.csv")
+Interest <- Interest[, c(-3, -4)]
+Interest <- melt(Interest, id.vars = c("Country Code", "Country Name"), na.rm = TRUE, value.name = "Interest")
+Interest$Interest <- as.numeric(Interest$Interest)
+# Look at interest rate from -20 to 20
+Interest <- Interest %>% filter(Interest <= 20 & Interest >= -20)
+# Join all of them together
+full <- full_join(passenger, GDP, by = c("Country Code", "Country Name", "variable")) %>%
+  full_join(., GDP_growth, by = c("Country Code", "Country Name", "variable")) %>%
+  full_join(., Inflation, by = c("Country Code", "Country Name", "variable")) %>%
+  full_join(., Interest, by = c("Country Code", "Country Name", "variable")) %>%
+  full_join(., coastline, by = "Country Name")
+
+colnames(full)[3] <- "year"
+
+# Next, we will load the crude oil and jet fuel history and clean them
+jet_fuel <- read_csv("~/Desktop/MA678/Midterm project/Data/Jet_Fuel.csv",
+  col_types = cols(Month = col_date(format = "%b %Y"))
+)
+colnames(jet_fuel)[c(1, 2)] <- c("DATE", "WJFUELUSGULF")
+jet_fuel$DATE <- format(as.Date(jet_fuel$DATE), "%Y")
+jet_fuel <- jet_fuel %>% group_by(DATE) %>% summarize(mean_jet_fuel = mean(WJFUELUSGULF))
+colnames(jet_fuel)[1] <- "year"
+oilprice <- read_csv("~/Desktop/MA678/Midterm project/Data/oilprice.csv",
+  col_types = cols(year = col_date(format = "%Y"))
+)
+oilprice$year <- format(as.Date(oilprice$year), "%Y")
+oilprice <- oilprice[-1:-14, ]
+
+# Then we will load the country indicator
+country_indication <- read_csv("~/Desktop/MA678/Midterm project/Data/country_indication.csv")
+x <- as.factor(country_indication$IncomeGroup)
+x <- factor(x, levels(x)[c(1, 4, 3, 2)])
+# Now we will join all of them together
+full <- full_join(full, jet_fuel, by = "year") %>%
+  full_join(., oilprice, by = "year") %>%
+  full_join(., country_indication, by = c("Country Code"))
+
+# Next we need to remove some na values in the full joined dataset.
+# a <- full[!is.na(full$passenger) & !is.na(full$GDP) &!is.na(full$Inflation) & !is.na(full$mean_jet_fuel) &!is.na(full$oil) &!is.na(full$IncomeGroup), ]
+a <- full[!is.na(full$passenger) & !is.na(full$GDP) & !is.na(full$IncomeGroup) & !is.na(full$`Country Name`), ]
+# Then we want to fill out NA for coastline column with 0 and take Canada out
+a$Coastline[is.na(a$Coastline)] <- 0
+
+# Remove an outlier and factorize group variable
+a <- a[a$passenger != 0, ]
+a <- a[a$passenger != 899, ]
+a$IncomeGroup <- as.factor(a$IncomeGroup)
+a$IncomeGroup <- factor(a$IncomeGroup, levels(a$IncomeGroup)[c(1, 4, 3, 2)])
+a$Region <- factor(a$Region)
+a$year <- as.Date(a$year, format = "%Y")
+a$year <- format(as.Date(a$year), "%Y")
+a$log_GDP <- log(a$GDP)
+a$log_passenger <- log(a$passenger)
+a$log_coastline <- log(a$Coastline + 1)
+a$sd_GDP_growth <- scale(a$GDP_growth)
+a$sd_GDP <- scale(a$GDP)
+a$sd_fuel <- scale(a$mean_jet_fuel)
+a$sd_oil <- scale(a$oil)
+a$sd_Inflation <- scale(a$Inflation)
+a$sd_Interest <- scale(a$Interest)
+a$log_fuel <- log(a$mean_jet_fuel)
+a$log_oil <- log(a$oil)
+a$log_previous_year <- log(a$previous_year+1)
+a$log_two_previous_year <- log(a$`2previous_year`+1)
+
+# There are some countries that experienced a lot of change in inflation or GDP growth
+# which I believe is due to either economic or political change. I want to exclude them from
+# the model because people usually use other currencies to buy tickects like U.S. dollars.
+# a <- a %>% filter(a$Inflation <= 100)
+# a <- a %>% filter(a$GDP_growth <= 100)
+```
+
+#Result for linear model
+
+##Model choice
+
+After checking the export values of aircraft, let's look at the relationship between time and passengers from the plot. In the plot below, we can see that each line represents a country. Most countries experience an increase of carried passengers over the past 30 years. Some low income and lower middle income countries experienced a drop of carried passengers after 2012. With further investigation we can see from the second plot that countries from sub-saharan Africa areas and Europe & Central Asia are among those low income countries whose carried passengers drop a lot.
+```{r echo=FALSE}
+a$year <- as.Date(a$year, format = "%Y")
+ggplot(a) + geom_line(aes(y = a$log_passenger, x = a$year, group = a$`Country Name`, color = a$Region)) + facet_wrap(~Region) + ylab("Log passengers") + xlab("Year") + ggtitle("Number of carried passengers for each year") + labs(color = "Region") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r echo=FALSE}
+a$year <- as.Date(a$year, format = "%Y")
+ggplot(a, aes(y = log_passenger, x = year, group = `Country Name`, colour = IncomeGroup)) +
+  geom_line() +
+  scale_size(range = c(2, 12)) +
+  facet_wrap(~IncomeGroup) + ylab("Log of carried passengers") +xlab("Year")
+```
+
+From these two animations we can see a strong positive relationship between GDP and passengers. In the animation, each point represents a country. Therefore, it is tentative to use linear regression model to predict the passengers. However, it is important to keep in mind that different income groups of countries behave differently. 
+```{r}
+ggplot(a, aes(y = log_passenger, x = log_GDP, group = `Country Name`, colour = IncomeGroup)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Year: {frame_time}", y = "Log of passengers", x = "Log of GDP") +
+  transition_time(a$year) +
+  ease_aes("linear")
+```
+
+```{r}
+ggplot(a, aes(y = log_passenger, x = log_GDP, group = `Country Name`, colour = IncomeGroup)) +
+  geom_point(alpha = 0.7, show.legend = FALSE) +
+  scale_size(range = c(2, 12)) +
+  facet_wrap(~IncomeGroup) +
+  # Here comes the gganimate specific bits
+  labs(title = "Year: {frame_time}", y = "Log of passengers", x = "Log of GDP") +
+  transition_time(year) +
+  ease_aes("linear")
+```
+
+This is a picture explaining the definition of coastline length.
+
+![Definition of coastline length](/Users/longhaochen/Desktop/MA678/Midterm project/EDA/coastline.jpeg)
+
+
+
+
+This plot describes a relationship between coastline length and number of passengers in a certain year. We can also see a positive relationship between coastline length and passengers.
+```{r, message=FALSE, warning=FALSE}
+a$year <- format(as.Date(a$year), "%Y")
+a$year <- as.numeric(a$year)
+b <- a[(a$Coastline != 0),]
+b <- b[  b$year==2010,]
+ggplot(b) + geom_point(aes(y = b$log_passenger, x = b$log_coastline, group = b$`Country Name`, color = b$IncomeGroup)) + geom_smooth(aes(y = b$log_passenger, x = b$log_coastline),
+  se = TRUE
+) + ylab("Log passengers") + xlab("Log coastline length") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Number of carried passengers and coastline distance relationship") + labs(color = "Income Group Country")
+```
+
+##Interpretation
+
+The forecasting model that is of first interest is linear regression model. We will first look at the linear regression with some transformation.
+
+The coefficients that are important to determine the number of passengers are log of GDP, log of previous year passengers and log of 2 years ago passengers. For example, for every 10% increase of GDP, we expect the passengers will increase 2%. This can be calculate by following equations.
+$$(1+0.1)^{Coefficient}=(1+x)$$
+$$(1.1)^{0.2} = (1+x)$$
+$$x=0.019  $$
+Some other coefficients do not meet our expectation such as mean jet fuel because of its positive sign. We would expect jet fuel price to have a negative relationship with passenger; in other words, the higher the jet fuel price it is, the less likely people will take aircraft because the airfare is usually higher. 
+
+Group indicators agree with our expectation. For example, low income country has larger magnitude of coefficient compared to lower middle countries. This means that the poorer a country is, the less likely people in that country will take commercial aircrafts.
+```{r}
+a$IncomeGroup <- as.factor(a$IncomeGroup)
+passenger_prediction <- lm(log_passenger ~ log_GDP + sd_GDP_growth + sd_Inflation + sd_Interest + mean_jet_fuel + log_oil + log_coastline + IncomeGroup + Region + log_previous_year + log_two_previous_year , data = a)
+arm::display(passenger_prediction)
+```
+
+
+## Model checking
+
+With the first plot we can see that the confidence interval of all the coefficients. If the horizontal solid line crosses the 0 dashed line, it indicates that the coefficient does not have statistical significance. For example the log oil coefficient probably does not have statistical significance. 
+```{r}
+arm::coefplot(passenger_prediction)
+```
+
+
+Next we will look at the residuals plot. In the residual plot, most points spread out evenly on both sides of the 0 line. There are several points such as 7932 observation that is deviated far from the 0 line. After examine the observation, I found out that this is because some of the important values such as the previous year of passengers value is missing.
+
+
+```{r}
+plot(passenger_prediction, which=1)
+```
+
+
+As we can see from this plot that our prediction value fit and actual log of passengers value together forms a straight line. Two red dashed lines are the boundaries of 95 confidence interval. Some of the real values fall in our prediction range but there are many that fall outside of the prediction range.
+
+```{r}
+#
+# new_df <- cbind(passenger_test, a)
+# new_df <- new_df[!is.na(new_df$fit),]
+#
+# new_df <- order(new_df)
+# ggplot(new_df, aes(fit,log_passenger))+
+#     geom_point() +
+#     geom_line(aes(y=lwr), color = "red", linetype = "dashed")+
+#     geom_line(aes(y=upr), color = "red", linetype = "dashed")
+
+model1<-predict(passenger_prediction,newdata=a,interval="confidence",level=0.95)
+ log_value<-a$log_passenger
+ model1<- cbind(model1,log_value)
+ model1 <- as.data.frame(model1)
+ model1 <- model1[!is.na(model1$fit),]
+ ggplot(model1,aes(y=log_value,x=fit))+geom_point(size=0.5)+
+   geom_line(aes(y=lwr),colour="red",linetype="dashed")+
+   geom_line(aes(y=upr),color="red",linetype="dashed") + xlab("Prediction Value")+ylab("Observed Value")
+```
+
+Next we will use the mixed effect linear model to predict the number of passengers. Similar to linear regression model, GDP, previous year and two years ago data together are the primary indicators for passenger this year. What is different is that different countries have different intercept(starting value) and slope(growth rate).
+```{r}
+a$new_year <- a$year - 1969
+a$sd_year <- scale(a$year)
+a$IncomeGroup <- as.numeric(a$IncomeGroup)
+
+a <- a[!is.na(a$previous_year)&!is.na(a$`2previous_year`),]
+passenger_prediction_lmer1 <- lmer(log_passenger ~ new_year +  sd_fuel + log_GDP+ IncomeGroup + log_previous_year + log_two_previous_year+  (1 + new_year| `Country Name`), data = a)
+arm::display(passenger_prediction_lmer1)
+
+```
+
+This plot is used to examine the prediction accuracy of linear mixed effect model. The red line represents the actual value of passengers carried on 2018 and grey lines are the confidence interval range of model predicted value. If the actual value falls out of the predicted range, then it follows a color of orange. We can see that this model is slightly better than the previous one.
+
+```{r}
+b <- as.data.table(a)
+cf <- fixef(passenger_prediction_lmer1)
+coefhat <- as.matrix(coef(passenger_prediction_lmer1)$`Country Name`)
+sigma.y.hat <- arm::sigma.hat(passenger_prediction_lmer1)$sigma$data
+sigma.a.hat <- arm::sigma.hat(passenger_prediction_lmer1)$sigma$`Country Name`
+year.max <- b[, mt := max(new_year), by = `Country Name`][new_year == mt]
+
+
+n <- nrow(year.max)
+simpoints <- matrix(NA, n, 1000)
+for (i in 1:1000) {
+  y.tilde <- rnorm(n, coefhat[, 1] + coefhat[, 2] * year.max$new_year + 
+    coefhat[, 3] * year.max$sd_fuel + coefhat[, 4] * year.max$log_GDP +coefhat[,5]*year.max$IncomeGroup +coefhat[,6]*year.max$log_previous_year + coefhat[,7]*year.max$log_two_previous_year, sigma.y.hat)
+  simpoints[, i] <- y.tilde
+}
+
+
+maxy <- year.max$log_passenger
+maxyord <- maxy[order(year.max$log_passenger)]
+simpointsord <- simpoints[order(year.max$log_passenger), ]
+plot(1:n, y = maxyord, col = "red", xlab = "index", ylab = "95% Posterior Predictive Interval")
+pint_ord <- apply(simpointsord, 1, quantile, c(0.025, 0.975))
+miss <- (maxyord < pint_ord[1, ] | maxyord > pint_ord[2, ])
+for (i in 1:n) {
+  lines(c(i, i), pint_ord[, i], lwd = 2, col = ifelse(miss[i], "orange", "gray"))
+}
+points(1:n, maxyord, col = "red", pch = 19)
+```
+
+
+#Discussion
+
+####Implication
+
+This mid term project implemented two methods in predicting the aircraft export values to China and expected passengers for each country in one year. The multiple regression model used the past behavior of macro economic indicators for prediction. It was important to examine the input variables in multiple regression model because of the correlations between input variables. Highly correlated input variables can make prediction less accurate.
+
+Overall, these two models provide sufficient accuracy in prediction. They are easy to use, and user friendly. These models can also be applied in other industries where the commodity follows a long production cycle, such as ship and trains. 
+
+####Limitation
+
+The limitation of regression model is that it does not cover the prediction of aircraft orders and deliveries, which is the primary concern for aviation industry. Another limitation is some of the input variables such as airfare are not incorporated in the prediction model because such data are not easily accessible through internet. Fitting more variables into the prediction model will greatly improve the accuracy. 
+
+####Future direction
+In the future, the next move would be to build on this model to predict the number of ordered aircrafts.
+
+
+
+#Reference
+Monahan, Kayla M., "Aircraft  Demand Forecasting" (2016). Masters  Theses. 329.
+https://scholarworks.umass.edu/masters_theses_2/329
+
+
+Haney, D. (1975). Review of aviation forecasting methodology. Rep. dot-40176, 6.
+Boeing (2018) Current Market Outlook 2018-2037
+
+Hans rosling https://www.gapminder.org/videos/gapmindervideos/gapcast-1-health-money-sex-in-sweden/
+
+Data scources:
+https://data.worldbank.org/
+https://www.census.gov/
+https://www.eia.gov/
+https://www.cia.gov/index.html
+
+
+
